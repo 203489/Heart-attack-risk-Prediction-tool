@@ -1,0 +1,248 @@
+# === Imports ===
+import pandas as pd
+import numpy as np
+import random
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from scipy.special import expit, logit
+from sklearn.metrics import accuracy_score, precision_score, recall_score
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc
+
+# === Load Data ===
+data = pd.read_excel("/content/heart_attack_data_cleaned.xlsx")
+
+# === Encode Categorical Columns ===
+label_encoders = {}
+for col in data.select_dtypes(include='object').columns:
+    le = LabelEncoder()
+    data[col] = le.fit_transform(data[col])
+    label_encoders[col] = le
+
+# === Define Features and Target ===
+X = data.drop(columns=["Heart_Attack_Risk"])
+y = data["Heart_Attack_Risk"]
+
+# === Scale Features ===
+scaler = MinMaxScaler()
+X_scaled = scaler.fit_transform(X)
+
+# === Train-Test Split ===
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+# === Train Models ===
+logreg = LogisticRegression(max_iter=1000).fit(X_train, y_train)
+rf = RandomForestClassifier(n_estimators=100, random_state=42).fit(X_train, y_train)
+gb = GradientBoostingClassifier(n_estimators=100, random_state=42).fit(X_train, y_train)
+
+# === Predict Probabilities ===
+logreg_probs = logreg.predict_proba(X_scaled)[:, 1]
+rf_probs = rf.predict_proba(X_scaled)[:, 1]
+gb_probs = gb.predict_proba(X_scaled)[:, 1]
+
+# === Average and Amplify Probabilities ===
+avg_probs = (logreg_probs + rf_probs + gb_probs) / 3
+adjusted_probs = expit(logit(avg_probs) * 1.5)  # Boost contrast
+
+# === Map Risk Category ===
+def map_risk_category(score):
+    if score < 0.31:
+        return 'Low'
+    elif score <= 0.65:
+        return 'Moderate'
+    else:
+        return 'High'
+
+risk_categories = [map_risk_category(score) for score in adjusted_probs]
+risk_scores_percent = (adjusted_probs * 100).round(2)
+
+# === Add to DataFrame ===
+data["Risk Score (%)"] = risk_scores_percent
+data["Risk Category"] = risk_categories
+
+
+# === Add Short Unique Patient IDs ===
+if "Patient ID" in data.columns:
+    data.drop(columns=["Patient ID"], inplace=True)
+
+unique_ids = random.sample(range(100000, 1000000), len(data))
+data.insert(0, "Patient ID", [f"PID{id_}" for id_ in unique_ids])
+
+# === Optional: Inspect Distribution ===
+print("🔍 Sample of raw probabilities:")
+print(avg_probs[:20])
+print("\n📊 Distribution:")
+print(data["Risk Category"].value_counts())
+
+# === Pie Chart for Risk Category Distribution ===
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(6, 6))
+data["Risk Category"].value_counts().plot.pie(
+    autopct='%1.1f%%',
+    startangle=90,
+    colors=['green', 'orange', 'red'],
+    title="Heart Attack Risk Distribution"
+)
+plt.ylabel("")
+plt.tight_layout()
+plt.show()
+
+
+# === Save Output ===
+output_path = "heart_attack_probabilistic_results.xlsx"
+data.to_excel(output_path, index=False)
+
+# === Threshold the predictions at 0.5 ===
+y_pred_logreg    = (logreg_probs >= 0.5).astype(int)
+y_pred_rf        = (rf_probs >= 0.5).astype(int)
+y_pred_gb        = (gb_probs >= 0.5).astype(int)
+y_pred_ensemble  = (avg_probs >= 0.5).astype(int)
+
+# === Compute metrics for each model (multi-class aware) ===
+metrics = {
+    "Logistic Regression": [
+        accuracy_score(y, y_pred_logreg),
+        precision_score(y, y_pred_logreg, average='weighted', zero_division=0),
+        recall_score(y, y_pred_logreg, average='weighted', zero_division=0)
+    ],
+    "Random Forest": [
+        accuracy_score(y, y_pred_rf),
+        precision_score(y, y_pred_rf, average='weighted', zero_division=0),
+        recall_score(y, y_pred_rf, average='weighted', zero_division=0)
+    ],
+    "Gradient Boosting": [
+        accuracy_score(y, y_pred_gb),
+        precision_score(y, y_pred_gb, average='weighted', zero_division=0),
+        recall_score(y, y_pred_gb, average='weighted', zero_division=0)
+    ],
+    "Ensemble Model": [
+        accuracy_score(y, y_pred_ensemble),
+        precision_score(y, y_pred_ensemble, average='weighted', zero_division=0),
+        recall_score(y, y_pred_ensemble, average='weighted', zero_division=0)
+    ]
+}
+
+# === Display numerical results ===
+print("\n📊 Model Evaluation Metrics")
+for model_name, scores in metrics.items():
+    print(f"\n🔹 {model_name}")
+    print(f"Accuracy : {scores[0]:.4f}")
+    print(f"Precision: {scores[1]:.4f}")
+    print(f"Recall   : {scores[2]:.4f}")
+
+# === Bar Chart for Visual Comparison ===
+labels = list(metrics.keys())
+acc = [m[0] for m in metrics.values()]
+prec = [m[1] for m in metrics.values()]
+rec = [m[2] for m in metrics.values()]
+
+x = range(len(labels))
+width = 0.25
+
+plt.figure(figsize=(10, 6))
+plt.bar([p - width for p in x], acc, width=width, label='Accuracy')
+plt.bar(x, prec, width=width, label='Precision')
+plt.bar([p + width for p in x], rec, width=width, label='Recall')
+
+plt.xticks(ticks=x, labels=labels, rotation=45)
+plt.ylabel("Score")
+plt.title("Model Performance Comparison")
+plt.ylim(0, 1)
+plt.legend()
+plt.tight_layout()
+plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+plt.show()
+
+#FIRST 10 PATIENT'S RISK SCORE
+import matplotlib.pyplot as plt
+
+# Get top 10 patients
+top10 = data.head(10)
+
+# Define color mapping based on Risk Category
+color_map = {
+    "Low": "green",
+    "Moderate": "orange",
+    "High": "red"
+}
+bar_colors = top10["Risk Category"].map(color_map)
+
+# Plot the bar chart
+ax = top10.plot.bar(
+    x="Patient ID",
+    y="Risk Score (%)",
+    color=bar_colors,
+    figsize=(10, 5),
+    legend=False
+)
+
+# Add text labels for Risk Category above each bar
+for i, row in top10.iterrows():
+    ax.text(
+        i,                             # x-position
+        row["Risk Score (%)"] + 1.5,   # y-position slightly above bar
+        row["Risk Category"],          # text
+        ha='center', va='bottom', fontsize=9, fontweight='bold'
+    )
+
+plt.title("Top 10 Patients' Risk Scores with Risk Categories")
+plt.ylabel("Risk Score (%)")
+plt.xlabel("Patient ID")
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+plt.show()
+
+
+
+from sklearn.metrics import roc_curve, auc
+
+# === Convert multiclass to binary for ROC: 1 = High risk, 0 = Low or Moderate ===
+y_binary = data["Risk Category"].apply(lambda x: 1 if x == "High" else 0)
+
+# === ROC Curve Plotting ===
+fpr_logreg, tpr_logreg, _ = roc_curve(y_binary, logreg_probs)
+fpr_rf, tpr_rf, _ = roc_curve(y_binary, rf_probs)
+fpr_gb, tpr_gb, _ = roc_curve(y_binary, gb_probs)
+fpr_ens, tpr_ens, _ = roc_curve(y_binary, avg_probs)
+
+plt.figure(figsize=(8, 6))
+plt.plot(fpr_logreg, tpr_logreg, label='Logistic Regression (AUC = %0.2f)' % auc(fpr_logreg, tpr_logreg))
+plt.plot(fpr_rf, tpr_rf, label='Random Forest (AUC = %0.2f)' % auc(fpr_rf, tpr_rf))
+plt.plot(fpr_gb, tpr_gb, label='Gradient Boosting (AUC = %0.2f)' % auc(fpr_gb, tpr_gb))
+plt.plot(fpr_ens, tpr_ens, label='Ensemble (AUC = %0.2f)' % auc(fpr_ens, tpr_ens), linestyle='--', linewidth=2)
+plt.plot([0, 1], [0, 1], 'k--', label='Chance')
+
+plt.title("ROC Curves for All Models")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig("roc_curves.png")  # Optional: Save as image
+plt.show()
+
+# === Feature Importance for Random Forest ===
+importances = rf.feature_importances_
+features = X.columns
+indices = np.argsort(importances)[::-1]
+
+plt.figure(figsize=(10, 6))
+plt.title("Random Forest Feature Importance")
+plt.bar(range(len(features)), importances[indices], align='center', color='skyblue')
+plt.xticks(range(len(features)), [features[i] for i in indices], rotation=45, ha='right')
+plt.ylabel("Importance Score")
+plt.tight_layout()
+plt.grid(axis='y', linestyle='--', alpha=0.7)
+plt.savefig("feature_importance_rf.png")  # Optional: Save as image
+plt.show()
+
+
+
+
+
+
+print(f"✅ Analysis complete! Results saved to: {output_path}")
