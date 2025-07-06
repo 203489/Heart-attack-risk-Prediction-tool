@@ -2,17 +2,24 @@
 import pandas as pd
 import numpy as np
 import random
+import os
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, MinMaxScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from scipy.special import expit, logit
-from sklearn.metrics import accuracy_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_curve, auc
 import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, auc
 
 # === Load Data ===
-data = pd.read_excel("/content/heart_attack_data_cleaned.xlsx")
+input_path = "/content/drive/MyDrive/heart_attack_data_cleaned.xls"
+data = pd.read_excel(input_path)
+
+# === Prepare Output Directory ===
+output_folder = os.path.dirname(input_path)
+excel_output_path = os.path.join(output_folder, "heart_attack_probabilistic_results.xlsx")
+roc_image_path = os.path.join(output_folder, "roc_curves.png")
+importance_image_path = os.path.join(output_folder, "feature_importance_rf.png")
 
 # === Encode Categorical Columns ===
 label_encoders = {}
@@ -62,7 +69,6 @@ risk_scores_percent = (adjusted_probs * 100).round(2)
 data["Risk Score (%)"] = risk_scores_percent
 data["Risk Category"] = risk_categories
 
-
 # === Add Short Unique Patient IDs ===
 if "Patient ID" in data.columns:
     data.drop(columns=["Patient ID"], inplace=True)
@@ -77,8 +83,6 @@ print("\n📊 Distribution:")
 print(data["Risk Category"].value_counts())
 
 # === Pie Chart for Risk Category Distribution ===
-import matplotlib.pyplot as plt
-
 plt.figure(figsize=(6, 6))
 data["Risk Category"].value_counts().plot.pie(
     autopct='%1.1f%%',
@@ -90,10 +94,8 @@ plt.ylabel("")
 plt.tight_layout()
 plt.show()
 
-
-# === Save Output ===
-output_path = "heart_attack_probabilistic_results.xlsx"
-data.to_excel(output_path, index=False)
+# === Save Output Excel File ===
+data.to_excel(excel_output_path, index=False)
 
 # === Threshold the predictions at 0.5 ===
 y_pred_logreg    = (logreg_probs >= 0.5).astype(int)
@@ -156,21 +158,11 @@ plt.tight_layout()
 plt.grid(True, axis='y', linestyle='--', alpha=0.7)
 plt.show()
 
-#FIRST 10 PATIENT'S RISK SCORE
-import matplotlib.pyplot as plt
-
-# Get top 10 patients
+# === First 10 Patients' Risk Scores ===
 top10 = data.head(10)
-
-# Define color mapping based on Risk Category
-color_map = {
-    "Low": "green",
-    "Moderate": "orange",
-    "High": "red"
-}
+color_map = {"Low": "green", "Moderate": "orange", "High": "red"}
 bar_colors = top10["Risk Category"].map(color_map)
 
-# Plot the bar chart
 ax = top10.plot.bar(
     x="Patient ID",
     y="Risk Score (%)",
@@ -179,12 +171,11 @@ ax = top10.plot.bar(
     legend=False
 )
 
-# Add text labels for Risk Category above each bar
 for i, row in top10.iterrows():
     ax.text(
-        i,                             # x-position
-        row["Risk Score (%)"] + 1.5,   # y-position slightly above bar
-        row["Risk Category"],          # text
+        i,
+        row["Risk Score (%)"] + 1.5,
+        row["Risk Category"],
         ha='center', va='bottom', fontsize=9, fontweight='bold'
     )
 
@@ -196,14 +187,9 @@ plt.tight_layout()
 plt.grid(axis='y', linestyle='--', alpha=0.7)
 plt.show()
 
-
-
-from sklearn.metrics import roc_curve, auc
-
-# === Convert multiclass to binary for ROC: 1 = High risk, 0 = Low or Moderate ===
+# === ROC Curve ===
 y_binary = data["Risk Category"].apply(lambda x: 1 if x == "High" else 0)
 
-# === ROC Curve Plotting ===
 fpr_logreg, tpr_logreg, _ = roc_curve(y_binary, logreg_probs)
 fpr_rf, tpr_rf, _ = roc_curve(y_binary, rf_probs)
 fpr_gb, tpr_gb, _ = roc_curve(y_binary, gb_probs)
@@ -222,7 +208,7 @@ plt.ylabel("True Positive Rate")
 plt.legend()
 plt.grid(True)
 plt.tight_layout()
-plt.savefig("roc_curves.png")  # Optional: Save as image
+plt.savefig(roc_image_path)
 plt.show()
 
 # === Feature Importance for Random Forest ===
@@ -237,12 +223,7 @@ plt.xticks(range(len(features)), [features[i] for i in indices], rotation=45, ha
 plt.ylabel("Importance Score")
 plt.tight_layout()
 plt.grid(axis='y', linestyle='--', alpha=0.7)
-plt.savefig("feature_importance_rf.png")  # Optional: Save as image
+plt.savefig(importance_image_path)
 plt.show()
 
-
-
-
-
-
-print(f"✅ Analysis complete! Results saved to: {output_path}")
+print(f"✅ Analysis complete! Results saved to: {excel_output_path}")
